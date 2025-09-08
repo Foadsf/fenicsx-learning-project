@@ -242,6 +242,39 @@ For a deep dive into the API discoveries and debugging process, see `docs/lesson
 
 ---
 
+### PV QuickLook (ParaView)
+
+A lightweight, cross-platform GUI to quickly preview simulation results without using the full ParaView UI.
+
+**Script:** `helpers/pv_quicklook_gui.py`
+**Supported inputs:** `.xdmf/.xmf`, `.pvd`, `.vtu/.pvtu`, `.vtk`, `.bp` (if available), and `.h5/.hdf5` via a companion `.xdmf`.
+
+#### Quick start (Windows example)
+
+```bash
+python helpers\pv_quicklook_gui.py -v output\transient_heat_solution.xdmf
+````
+
+* In the GUI, set **ParaView GUI (optional)** to your ParaView desktop binary.
+  Default path on Windows:
+  `C:\Program Files\ParaView 5.13.1\bin\paraview.exe`
+* The app will **infer `pvpython.exe`** from that path and render **off-process** using ParaView’s Python.
+  (This avoids Python/ABI mismatches; your local Python can be 3.13+, while ParaView’s is 3.10.)
+* Use the simple controls (representation, color by, time step, camera) and **Save Screenshot…**.
+* **Open in ParaView GUI** launches the full ParaView if you want to deep-dive.
+
+#### CLI options
+
+* `-v, --verbose` – prints a diagnostic report (Python, PATH, sys.path, dataset, etc.) before the GUI starts.
+
+#### Notes & troubleshooting
+
+* If the preview fails, the **status bar** shows the exact error captured from `pvpython` (e.g., missing plugin, invalid XDMF, etc.).
+* Rendering is done offscreen; no desktop OpenGL context is required.
+* For `.h5` data, prefer providing an `.xdmf` sidecar describing topology/geometry.
+
+---
+
 *Generated: September 8, 2025*
 *FEniCSx Version: 0.9.0*
 *Environment: WSL2 Ubuntu + Windows ParaView*
