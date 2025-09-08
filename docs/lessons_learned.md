@@ -241,6 +241,203 @@ print(f"Maximum error: {max_error:.2e}")
 
 ---
 
+---
+
+## 11. File Format Compatibility and Diagnostics
+
+### ParaView Compatibility Issues
+**Problem discovered**: XDMF and ADIOS2 BP formats often fail to open in Windows ParaView
+**Root causes identified**:
+- WSL2/Windows path compatibility issues
+- Different HDF5 library versions between FEniCSx and ParaView
+- ADIOS2 format not consistently supported across ParaView builds
+
+**Solutions developed**:
+1. **Multi-format export strategy**: Always export to VTK as fallback
+2. **Diagnostic tools**: Created comprehensive file health checker
+3. **Format-specific fixes**: Different approaches for each file type
+
+### File Health Checking
+**Created diagnostic workflow**:
+```python
+# Check individual files with automatic visualization
+python3 helpers/check_file_health.py output/file.vtk
+python3 helpers/check_file_health.py output/data.bp
+
+# Comprehensive directory scan
+python3 helpers/check_file_health.py output/
+```
+
+**Diagnostic capabilities developed**:
+- **VTK validation**: Header parsing, data section verification
+- **XDMF validation**: XML structure, HDF5 reference checking
+- **BP format analysis**: ADIOS2 metadata inspection and variable reading
+- **Automatic visualization**: Data plotting for healthy files
+
+---
+
+## 12. Advanced Boundary Conditions Implementation
+
+### Mixed Boundary Conditions
+**Challenge**: Implementing realistic engineering boundary conditions
+**Achieved in heat conduction example**:
+- **Dirichlet BC**: `fem.dirichletbc(T_hot, left_dofs, V)`
+- **Robin BC**: Surface integral `h * T * v * ds(boundary_id)`
+- **Neumann BC**: Natural boundary condition (no explicit implementation needed)
+
+**Key implementation details**:
+```python
+# Boundary marking
+right_facets = mesh.locate_entities_boundary(domain, 1, right_boundary)
+marked_values = np.full(len(right_facets), 1, dtype=np.int32)
+facet_tag = mesh.meshtags(domain, 1, right_facets, marked_values)
+ds = ufl.Measure("ds", domain=domain, subdomain_data=facet_tag)
+
+# Robin BC in weak form
+a_convection = h * T * v * ds(1)  # Left-hand side
+L_convection = h * T_air * v * ds(1)  # Right-hand side
+```
+
+---
+
+## 13. Coupled Physics Problems
+
+### Thermal Stress Analysis
+**Challenge**: Coupling thermal and mechanical physics
+**Implementation approach**:
+1. **Sequential coupling**: Solve thermal problem first
+2. **Function space interpolation**: Transfer temperature to mechanical problem
+3. **Simplified thermal loading**: Equivalent body forces instead of full thermal strain
+
+**Key lessons**:
+- **Function space compatibility**: Direct coupling causes UFL compilation errors
+- **Interpolation necessity**: `T_mech.interpolate(T_h)` required for cross-physics data transfer
+- **API complexity**: Full thermal strain implementation requires advanced UFL techniques
+
+**Working solution pattern**:
+```python
+# Solve thermal problem
+T_h = solve_thermal_problem(domain, props)
+
+# Transfer to mechanical problem
+V_T_mech = fem.functionspace(domain, ("Lagrange", 1))
+T_mech = fem.Function(V_T_mech)
+T_mech.interpolate(T_h)
+
+# Use in mechanical analysis
+thermal_force = alpha * E * (T_avg - T_ref) / domain.geometry.dim
+```
+
+---
+
+## 14. ADIOS2 Integration and BP File Handling
+
+### ADIOS2 Python API Discovery
+**Challenge**: Limited documentation for ADIOS2 Python bindings
+**API patterns discovered**:
+```python
+# Correct ADIOS2 usage
+reader = adios2.FileReader(str(bp_directory))
+variables = reader.available_variables()
+data = reader.read(variable_name)
+reader.close()
+```
+
+**Common API mistakes to avoid**:
+- `adios2.open()` doesn't exist (use `FileReader`)
+- `adios2.ADIOS()` vs `adios2.Adios()` (case sensitivity)
+- Mode constants are integers, not enums
+- All methods use snake_case, not PascalCase
+
+### BP File Structure Understanding
+**ADIOS2 BP format consists of**:
+- `data.0`: Binary simulation data
+- `md.0`, `md.idx`: Metadata files
+- `mmd.0`: Additional metadata
+- `profiling.json`: Performance information
+
+**Health indicators**:
+- All required files present
+- Non-zero metadata file size (>100 bytes typically)
+- Readable variable list with expected names
+
+---
+
+## 15. Environment Management and Cross-Platform Issues
+
+### WSL2 + Windows Integration
+**File path handling**:
+- WSL2 paths: `/mnt/c/dev/project/`
+- Windows paths: `C:\dev\project\`
+- ParaView access: `"C:\Program Files\ParaView\bin\paraview.exe" file.vtk`
+
+**Python environment separation**:
+- **WSL2**: FEniCSx conda environment for simulation
+- **Windows**: Separate Python for Windows-only tools
+- **Recommendation**: Run all analysis from WSL2 environment
+
+**Key integration commands**:
+```bash
+# From WSL2, open Windows ParaView
+"/mnt/c/Program Files/ParaView 5.13.1/bin/paraview.exe" output/file.vtk
+
+# Access WSL2 files from Windows
+\\wsl$\Ubuntu\home\username\project\
+```
+
+---
+
+## 16. Performance and Optimization Notes
+
+### File Format Performance
+**Format comparison for medium problems (1000-10000 DOF)**:
+- **VTK ASCII**: Slow write, universal compatibility
+- **XDMF+HDF5**: Fast write, compatibility issues
+- **ADIOS2 BP**: Fastest write, visualization challenges
+- **Raw NumPy**: Fastest for post-processing
+
+**Memory usage observations**:
+- **PETSc solvers**: Efficient for sparse systems
+- **Function space interpolation**: Memory overhead for cross-physics coupling
+- **Visualization data**: Store only essential fields to reduce file sizes
+
+### Solver Configuration
+**Tested configurations**:
+- **Small problems (<5000 DOF)**: `PREONLY` + `LU` (direct solver)
+- **Thermal problems**: Generally well-conditioned, fast convergence
+- **Coupled problems**: Sequential solving more robust than monolithic
+
+---
+
+## 17. Quality Assurance and Validation
+
+### Solution Verification Strategy
+**Multi-level validation implemented**:
+1. **Analytical comparison**: Known exact solutions where possible
+2. **Physical bounds checking**: Temperature/stress ranges
+3. **Conservation verification**: Energy balance for thermal problems
+4. **Mesh convergence**: Systematic refinement studies
+
+**Automated checks in examples**:
+```python
+# Range validation
+T_min, T_max = T_h.x.array.min(), T_h.x.array.max()
+assert T_min >= props["T_air"], "Temperature below ambient"
+assert T_max <= props["T_hot"] + 1e-6, "Temperature above boundary condition"
+
+# Conservation check
+total_heat_generated = props['q_source'] * domain_area
+```
+
+### Regression Testing Framework
+**File health checker as testing tool**:
+- Automatically validates all output formats
+- Detects file corruption or format changes
+- Provides quantitative metrics for solution comparison
+- Enables automated CI/CD integration
+
+---
+
 ## Summary
 
 The key to successful FEniCSx development is:
