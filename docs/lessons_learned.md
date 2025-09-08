@@ -718,6 +718,161 @@ for t in time_steps:
 
 ---
 
+---
+
+## 20. Computational Fluid Dynamics with Navier-Stokes
+
+### IPCS (Incremental Pressure Correction Scheme)
+**Challenge**: Solving coupled velocity-pressure system efficiently
+**Solution**: Fractional step method decoupling velocity and pressure
+
+**IPCS algorithm implementation**:
+```python
+# Step 1: Tentative velocity (ignore pressure gradient)
+F1 = (1/dt)*ufl.inner(u - u_km1, v)*ufl.dx + \
+     ufl.inner(ufl.dot(u_km1, ufl.grad(u_mid)), v)*ufl.dx + \
+     nu*ufl.inner(ufl.grad(u_mid), ufl.grad(v))*ufl.dx - \
+     ufl.inner(p_km1, ufl.div(v))*ufl.dx
+
+# Step 2: Pressure correction (Poisson equation)
+a2 = ufl.dot(ufl.grad(p), ufl.grad(q))*ufl.dx
+L2 = -(1/dt)*ufl.div(u_k)*q*ufl.dx
+
+# Step 3: Velocity correction
+a3 = ufl.dot(u, v)*ufl.dx
+L3 = ufl.dot(u_k, v)*ufl.dx - dt*ufl.dot(ufl.grad(phi), v)*ufl.dx
+```
+
+### GMSH Integration for Complex Geometry
+**Challenge**: Creating meshes with curved boundaries and internal obstacles
+**DOLFINx v0.9.0 GMSH workflow**:
+```python
+import gmsh
+from dolfinx import io
+
+# Create geometry with boolean operations
+channel = gmsh.model.occ.addRectangle(0, 0, 0, L, H)
+cylinder = gmsh.model.occ.addDisk(c_x, c_y, 0, r, r)
+fluid_domain, _ = gmsh.model.occ.cut([(2, channel)], [(2, cylinder)])
+
+# Convert to DOLFINx mesh
+domain, cell_markers, facet_markers = io.gmshio.model_to_mesh(gmsh.model, comm, 0, gdim=2)
+```
+
+**Key discoveries**:
+- Use `io.gmshio.model_to_mesh` (not `io.gmsh.model_to_mesh`)
+- Boundary classification by bounding box analysis more robust than `getCenterOfMass`
+- Physical group creation essential for boundary condition application
+
+### Taylor-Hood Element Implementation
+**Mixed finite element for incompressible flow**:
+- **P2 velocity elements**: Capture velocity gradients accurately
+- **P1 pressure elements**: Satisfy inf-sup stability condition
+- **DOF relationship**: ~3:1 velocity to pressure DOFs
+
+```python
+# Taylor-Hood function spaces
+V = fem.functionspace(domain, ("Lagrange", 2, (domain.geometry.dim,)))  # P2 vector
+Q = fem.functionspace(domain, ("Lagrange", 1))  # P1 scalar
+```
+
+### Complex Boundary Condition Implementation
+**Parabolic inflow profile**:
+```python
+class InflowVelocity:
+    def __call__(self, x):
+        return np.vstack((
+            4 * U_max * x[1] * (H - x[1]) / (H**2),  # Parabolic u-velocity
+            np.zeros(x.shape[1])  # Zero v-velocity
+        ))
+
+# Apply via Function interpolation
+u_inflow = fem.Function(V)
+u_inflow.interpolate(InflowVelocity(U_max, H))
+bc_inflow = fem.dirichletbc(u_inflow, inflow_dofs)
+```
+
+**Cannot use Constant for complex profiles** - requires Function interpolation
+
+### CFD-Specific Solver Configuration
+**Optimized solver choices for each IPCS step**:
+```python
+# Step 1: Momentum (convection-diffusion)
+solver1.setType(PETSc.KSP.Type.BCGS)     # BiCGStab for nonsymmetric
+solver1.getPC().setType(PETSc.PC.Type.JACOBI)
+
+# Step 2: Pressure Poisson (symmetric)
+solver2.setType(PETSc.KSP.Type.MINRES)   # Minimal residual
+solver2.getPC().setType(PETSc.PC.Type.HYPRE)
+
+# Step 3: Velocity correction (simple)
+solver3.setType(PETSc.KSP.Type.CG)       # Conjugate gradient
+solver3.getPC().setType(PETSc.PC.Type.JACOBI)
+```
+
+### Performance Optimization for CFD
+**Matrix assembly strategy**:
+- Pre-assemble all time-independent matrices before time loop
+- Only assemble RHS vectors in time loop
+- Reuse solver objects to avoid setup overhead
+
+**Memory management**:
+- Use `with b.localForm() as loc_b: loc_b.set(0)` to zero vectors efficiently
+- Apply scatter operations: `u_k.x.scatter_forward()` after solving
+- Update arrays in-place: `u_km1.x.array[:] = u_k.x.array`
+
+### High-Order Element Export Issues
+**Problem**: P2 velocity elements incompatible with XDMF export
+**Solution**: Interpolate to P1 for visualization
+```python
+# Create export spaces
+V_export = fem.functionspace(domain, ("Lagrange", 1, (domain.geometry.dim,)))
+Q_export = fem.functionspace(domain, ("Lagrange", 1))
+
+# Interpolate for export
+u_export.interpolate(u_k)
+p_export.interpolate(p_km1)
+xdmf.write_function(u_export, t)
+```
+
+### CFD Validation and Physical Insight
+**Expected flow phenomena**:
+- **Flow attachment/separation**: Around cylinder surface
+- **Vortex shedding**: Periodic Kármán vortex street formation
+- **Reynolds number effects**: Re = U*D/ν determines flow regime
+
+**Typical validation metrics**:
+- **Drag/lift coefficients**: Force integration on cylinder
+- **Strouhal number**: Vortex shedding frequency
+- **Velocity profiles**: Comparison with experimental data
+
+### Common CFD Implementation Pitfalls
+**Boundary condition errors**:
+```python
+# WRONG: Using Constant for complex profiles
+bc = fem.dirichletbc(fem.Constant(domain, (U, 0)), dofs, V)
+
+# CORRECT: Using Function interpolation
+u_bc = fem.Function(V)
+u_bc.interpolate(velocity_profile)
+bc = fem.dirichletbc(u_bc, dofs)
+```
+
+**Solver convergence issues**:
+- **CFL condition**: Δt < h/U for explicit terms
+- **Pressure reference**: Always specify pressure BC or set reference point
+- **Initial conditions**: Use reasonable velocity/pressure initialization
+
+### Extension to Advanced CFD
+**Natural extensions from this foundation**:
+- **Turbulent flows**: k-ε, LES models
+- **Free surface flows**: VOF, level set methods
+- **Compressible flows**: Full Navier-Stokes with density variations
+- **Multiphase flows**: Fluid-fluid and fluid-solid interactions
+- **Heat transfer**: Coupled momentum-energy equations
+
+---
+
 ## Summary
 
 The key to successful FEniCSx development is:

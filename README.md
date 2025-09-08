@@ -187,6 +187,25 @@ This time-dependent example features:
 
 The simulation models a copper plate with a central heat source, showing realistic heat diffusion patterns over time.
 
+### Computational Fluid Dynamics (CFD)
+A complete implementation of the incompressible Navier-Stokes equations for laminar flow:
+
+```bash
+cd examples/06_navier_stokes_laminar_flow/
+python3 karman_vortex_street.py
+```
+
+This advanced CFD example demonstrates:
+- **Incompressible Navier-Stokes equations**: Full momentum and continuity equations
+- **IPCS fractional step method**: Incremental Pressure Correction Scheme for efficiency
+- **Complex geometry**: GMSH integration for channel with cylindrical obstacle
+- **Taylor-Hood elements**: P2 velocity, P1 pressure (inf-sup stable)
+- **Realistic boundary conditions**: Parabolic inflow, no-slip walls, pressure outflow
+- **Vortex shedding**: Kármán vortex street formation behind cylinder
+- **Long-time simulation**: 8000 time steps showing flow development
+
+The simulation captures the classic fluid dynamics phenomenon of periodic vortex shedding.
+
 ## Diagnostic and Visualization Tools
 
 ### File Health Checker
