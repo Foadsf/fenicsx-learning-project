@@ -789,6 +789,261 @@ class FileHealthChecker:
         except Exception as e:
             print(f"  Error creating metadata visualization: {e}")
 
+    def check_vtu_file(self, file_path):
+        """Check VTU (VTK Unstructured Grid) file health"""
+        print(f"Checking VTU: {file_path.name}")
+
+        if not self.check_file_exists_and_readable(file_path):
+            return
+
+        try:
+            tree = ET.parse(file_path)
+            root = tree.getroot()
+
+            if root.tag != "VTKFile":
+                self.log_issue(
+                    "ERROR", file_path, f"Root element is {root.tag}, expected VTKFile"
+                )
+                return
+
+            # Check VTK file type
+            file_type = root.get("type", "")
+            if file_type != "UnstructuredGrid":
+                self.log_issue(
+                    "WARNING",
+                    file_path,
+                    f"File type is {file_type}, expected UnstructuredGrid",
+                )
+
+            # Find data arrays
+            pieces = root.findall(".//Piece")
+            points = root.findall(".//Points")
+            cells = root.findall(".//Cells")
+            point_data = root.findall(".//PointData")
+
+            print(
+                f"  Found: {len(pieces)} pieces, {len(points)} point sets, {len(cells)} cell sets"
+            )
+            print(f"  Data arrays: {len(point_data)} point data sections")
+
+            self.summary[file_path.name] = {
+                "pieces": len(pieces),
+                "points": len(points),
+                "cells": len(cells),
+                "point_data": len(point_data),
+                "format": "VTU",
+            }
+
+            print(f"  ✓ VTU file appears valid")
+
+        except ET.ParseError as e:
+            self.log_issue("ERROR", file_path, f"XML parsing error: {e}")
+        except Exception as e:
+            self.log_issue("ERROR", file_path, f"Error reading VTU file: {e}")
+
+    def visualize_vtu_file(self, file_path):
+        """Visualize VTU file data"""
+        print(f"Creating visualization for VTU file: {file_path.name}")
+
+        try:
+            import xml.etree.ElementTree as ET
+
+            tree = ET.parse(file_path)
+            root = tree.getroot()
+
+            # Extract point coordinates
+            points_elem = root.find(".//Points/DataArray")
+            if points_elem is not None and points_elem.text:
+                coords_text = points_elem.text.strip()
+                coords_flat = [float(x) for x in coords_text.split()]
+                coords = np.array(coords_flat).reshape(-1, 3)[:, :2]  # Take only x,y
+
+                # Extract point data arrays
+                point_data_arrays = {}
+                for data_array in root.findall(".//PointData/DataArray"):
+                    name = data_array.get("Name", "Unknown")
+                    if data_array.text:
+                        values = [float(x) for x in data_array.text.strip().split()]
+                        point_data_arrays[name] = np.array(values)
+
+                # Create visualization
+                fig, axes = plt.subplots(
+                    1,
+                    len(point_data_arrays) + 1,
+                    figsize=(5 * (len(point_data_arrays) + 1), 5),
+                )
+                if len(point_data_arrays) == 0:
+                    axes = [axes]
+
+                # Plot mesh
+                ax_mesh = axes[0]
+                ax_mesh.scatter(coords[:, 0], coords[:, 1], s=10, alpha=0.6)
+                ax_mesh.set_title("Mesh Points")
+                ax_mesh.set_xlabel("X")
+                ax_mesh.set_ylabel("Y")
+                ax_mesh.set_aspect("equal")
+
+                # Plot data arrays
+                for i, (name, values) in enumerate(point_data_arrays.items()):
+                    if i + 1 < len(axes):
+                        ax = axes[i + 1]
+                        scatter = ax.scatter(
+                            coords[:, 0], coords[:, 1], c=values, cmap="viridis", s=20
+                        )
+                        plt.colorbar(scatter, ax=ax)
+                        ax.set_title(f"{name}")
+                        ax.set_xlabel("X")
+                        ax.set_ylabel("Y")
+                        ax.set_aspect("equal")
+
+                plt.tight_layout()
+                output_name = f"{file_path.stem}_vtu_visualization.png"
+                plt.savefig(output_name, dpi=150, bbox_inches="tight")
+                print(f"  Visualization saved as: {output_name}")
+                plt.show()
+
+        except Exception as e:
+            print(f"  Error creating VTU visualization: {e}")
+
+    def visualize_pvd_file(self, file_path):
+        """Visualize PVD file by opening referenced VTU files"""
+        print(f"Creating visualization for PVD file: {file_path.name}")
+
+        try:
+            tree = ET.parse(file_path)
+            root = tree.getroot()
+
+            # Find referenced VTU files
+            datasets = root.findall(".//DataSet")
+            if not datasets:
+                print("  No datasets found in PVD file")
+                return
+
+            # Visualize the first referenced file
+            first_dataset = datasets[0]
+            vtu_file = first_dataset.get("file", "")
+            if vtu_file:
+                vtu_path = file_path.parent / vtu_file
+                if vtu_path.exists():
+                    print(f"  Visualizing referenced file: {vtu_file}")
+                    self.visualize_vtu_file(vtu_path)
+                else:
+                    print(f"  Referenced file not found: {vtu_file}")
+
+        except Exception as e:
+            print(f"  Error creating PVD visualization: {e}")
+
+    def visualize_xdmf_file(self, file_path):
+        """Visualize XDMF file by reading HDF5 data"""
+        print(f"Creating visualization for XDMF file: {file_path.name}")
+
+        try:
+            # Parse XDMF to find HDF5 references
+            tree = ET.parse(file_path)
+            root = tree.getroot()
+
+            h5_refs = {}
+            for item in root.findall(".//DataItem"):
+                if item.get("Format") == "HDF" and item.text:
+                    h5_ref = item.text.strip()
+                    if ":" in h5_ref:
+                        h5_file, h5_path = h5_ref.split(":", 1)
+                        if h5_file not in h5_refs:
+                            h5_refs[h5_file] = []
+                        h5_refs[h5_file].append(h5_path)
+
+            if not h5_refs:
+                print("  No HDF5 references found in XDMF")
+                return
+
+            # Read data from HDF5 files
+            for h5_file, paths in h5_refs.items():
+                h5_path = file_path.parent / h5_file
+                if h5_path.exists():
+                    self.visualize_h5_file(h5_path)
+                    break
+
+        except Exception as e:
+            print(f"  Error creating XDMF visualization: {e}")
+
+    def visualize_h5_file(self, file_path):
+        """Visualize HDF5 file data"""
+        print(f"Creating visualization for HDF5 file: {file_path.name}")
+
+        try:
+            with h5py.File(file_path, "r") as f:
+                datasets = {}
+
+                def collect_datasets(name, obj):
+                    if isinstance(obj, h5py.Dataset):
+                        datasets[name] = obj[...]
+
+                f.visititems(collect_datasets)
+
+                if not datasets:
+                    print("  No datasets found in HDF5 file")
+                    return
+
+                # Look for key datasets
+                geometry_data = None
+                function_data = {}
+
+                for name, data in datasets.items():
+                    if "geometry" in name.lower():
+                        geometry_data = data
+                    elif "function" in name.lower() or name.endswith("/0"):
+                        func_name = name.split("/")[-2] if "/" in name else name
+                        function_data[func_name] = data
+
+                # Create visualization
+                num_plots = 1 + len(function_data)
+                fig, axes = plt.subplots(1, num_plots, figsize=(5 * num_plots, 5))
+                if num_plots == 1:
+                    axes = [axes]
+
+                # Plot geometry if available
+                if geometry_data is not None and geometry_data.ndim == 2:
+                    ax = axes[0]
+                    ax.scatter(
+                        geometry_data[:, 0], geometry_data[:, 1], s=10, alpha=0.6
+                    )
+                    ax.set_title("Geometry")
+                    ax.set_xlabel("X")
+                    ax.set_ylabel("Y")
+                    ax.set_aspect("equal")
+
+                # Plot function data
+                plot_idx = 1
+                for func_name, data in function_data.items():
+                    if plot_idx < len(axes) and geometry_data is not None:
+                        ax = axes[plot_idx]
+                        if data.ndim == 2 and data.shape[1] == 1:
+                            data = data.flatten()
+
+                        if data.ndim == 1 and len(data) == len(geometry_data):
+                            scatter = ax.scatter(
+                                geometry_data[:, 0],
+                                geometry_data[:, 1],
+                                c=data,
+                                cmap="viridis",
+                                s=20,
+                            )
+                            plt.colorbar(scatter, ax=ax)
+                            ax.set_title(f"{func_name}")
+                            ax.set_xlabel("X")
+                            ax.set_ylabel("Y")
+                            ax.set_aspect("equal")
+                        plot_idx += 1
+
+                plt.tight_layout()
+                output_name = f"{file_path.stem}_h5_visualization.png"
+                plt.savefig(output_name, dpi=150, bbox_inches="tight")
+                print(f"  Visualization saved as: {output_name}")
+                plt.show()
+
+        except Exception as e:
+            print(f"  Error creating HDF5 visualization: {e}")
+
 
 def main():
     if len(sys.argv) > 1:
@@ -820,6 +1075,8 @@ def main():
                 checker.check_h5_file(target_path)
             elif target_path.suffix == ".pvd":
                 checker.check_pvd_file(target_path)
+            elif target_path.suffix == ".vtu":
+                checker.check_vtu_file(target_path)
             else:
                 print(f"Unsupported file type: {target_path.suffix}")
                 return
@@ -860,6 +1117,18 @@ def main():
             if target_path.is_file() and target_path.suffix == ".vtk":
                 print("\n📊 Creating VTK visualization...")
                 checker.visualize_vtk_file(target_path)
+            elif target_path.is_file() and target_path.suffix == ".vtu":
+                print("\n📊 Creating VTU visualization...")
+                checker.visualize_vtu_file(target_path)
+            elif target_path.is_file() and target_path.suffix == ".pvd":
+                print("\n📊 Creating PVD visualization...")
+                checker.visualize_pvd_file(target_path)
+            elif target_path.is_file() and target_path.suffix == ".xdmf":
+                print("\n📊 Creating XDMF visualization...")
+                checker.visualize_xdmf_file(target_path)
+            elif target_path.is_file() and target_path.suffix == ".h5":
+                print("\n📊 Creating HDF5 visualization...")
+                checker.visualize_h5_file(target_path)
             elif target_path.is_dir() and target_path.suffix == ".bp":
                 print("\n📊 Creating BP visualization...")
                 checker.visualize_bp_directory(target_path)
