@@ -169,6 +169,24 @@ This advanced example demonstrates:
 
 The solver achieves machine precision accuracy (errors ~10^-5) for complex nonlinear problems.
 
+### Time-Dependent PDEs
+A comprehensive example of transient heat conduction with time evolution:
+
+```bash
+cd examples/05_transient_heat_equation/
+python3 transient_heat_conduction.py
+```
+
+This time-dependent example features:
+- **Transient heat equation**: ∂u/∂t = α∇²u with thermal diffusivity
+- **Time discretization**: Backward Euler scheme for stability
+- **Complex boundary conditions**: Central heat source with fixed outer boundaries
+- **Time-stepping simulation**: 200 time steps over 10 seconds
+- **Animation output**: Time series data for ParaView visualization
+- **Progress tracking**: Real-time simulation progress display
+
+The simulation models a copper plate with a central heat source, showing realistic heat diffusion patterns over time.
+
 ## Diagnostic and Visualization Tools
 
 ### File Health Checker

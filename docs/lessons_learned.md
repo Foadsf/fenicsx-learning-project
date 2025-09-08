@@ -560,6 +560,164 @@ domain.topology.create_connectivity(domain.topology.dim - 1, domain.topology.dim
 
 ---
 
+---
+
+## 19. Time-Dependent PDE Implementation
+
+### Transient Heat Equation Formulation
+**Problem**: ∂u/∂t = α∇²u (heat diffusion equation)
+**Time discretization**: Backward Euler for unconditional stability
+
+**Weak form derivation**:
+```python
+# Backward Euler: (u^n+1 - u^n)/Δt = α∇²u^n+1
+# Weak form: ∫(u - u_n)v dx = ∫ α Δt ∇u·∇v dx
+F = u*v*ufl.dx + alpha*dt*ufl.dot(ufl.grad(u), ufl.grad(v))*ufl.dx - u_n*v*ufl.dx
+a = ufl.lhs(F)  # Terms with unknown u
+L = ufl.rhs(F)  # Terms with known u_n
+```
+
+### Time-Stepping Implementation Pattern
+**DOLFINx v0.9.0 time-stepping workflow**:
+```python
+# 1. Assemble time-independent matrix once
+A = fem_petsc.assemble_matrix(a, bcs=bcs)
+A.assemble()
+
+# 2. Time loop
+for i in range(num_steps):
+    t += dt
+
+    # Assemble RHS (depends on previous solution u_n)
+    b = fem_petsc.assemble_vector(L)
+    fem_petsc.apply_lifting(b, [a], bcs=[bcs])
+    b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
+    fem_petsc.set_bc(b, bcs)
+
+    # Solve and update
+    solver.solve(b, uh.x.petsc_vec)
+    u_n.x.array[:] = uh.x.array  # Update for next step
+```
+
+### Performance Optimization Strategies
+**Matrix assembly optimization**:
+- **Assemble matrix once**: Time-independent terms assembled outside loop
+- **RHS assembly per step**: Only right-hand side changes with time
+- **Solver reuse**: Create solver once, reuse for all time steps
+
+**Memory management**:
+- **In-place updates**: `u_n.x.array[:] = uh.x.array` avoids allocation
+- **Solver object reuse**: Avoid creating new solver each step
+- **Selective output**: Save solution every N steps, not every step
+
+### Time Discretization Considerations
+**Backward Euler characteristics**:
+- **Unconditionally stable**: No CFL time step restriction
+- **First-order accurate**: O(Δt) temporal error
+- **Implicit**: Requires solving linear system each step
+- **Suitable for diffusion**: Natural for parabolic PDEs
+
+**Alternative schemes available**:
+- **Crank-Nicolson**: Second-order accurate, more complex
+- **Forward Euler**: Explicit but conditionally stable
+- **Higher-order**: BDF methods for higher accuracy
+
+### XDMF Time Series Output
+**Time-dependent visualization setup**:
+```python
+xdmf = io.XDMFFile(domain.comm, "solution.xdmf", "w")
+xdmf.write_mesh(domain)
+
+# Time loop
+for t in time_points:
+    # ... solve ...
+    xdmf.write_function(uh, t)  # Associate solution with time value
+
+xdmf.close()
+```
+
+**ParaView time controls**:
+- Time slider appears automatically for time series data
+- Animation controls enable play/pause functionality
+- Time derivatives and temporal analysis possible
+
+### Progress Monitoring
+**Using tqdm for long simulations**:
+```python
+from tqdm import tqdm
+
+progress = tqdm(range(num_steps), desc="Time-stepping")
+for i in progress:
+    # ... time step ...
+    progress.set_postfix({"t": f"{t:.2f}s", "temp_max": f"{np.max(uh.x.array):.1f}"})
+```
+
+**Benefits**:
+- Real-time progress feedback
+- ETA estimates for long simulations
+- Custom metrics display (temperature, energy, etc.)
+
+### Boundary Condition Time Dependence
+**Static vs. time-dependent BCs**:
+```python
+# Static BC (assembled once)
+bc_static = fem.dirichletbc(constant_value, dofs, V)
+
+# Time-dependent BC (update each step)
+bc_function = fem.Function(V)
+for t in time_steps:
+    bc_function.interpolate(lambda x: time_dependent_value(x, t))
+    # Apply updated BC
+```
+
+### Physical Parameter Validation
+**Thermal diffusivity calculation**:
+```python
+alpha = k / (rho * cp)  # [m²/s]
+```
+
+**Typical values for validation**:
+- **Copper**: α ≈ 1.16×10⁻⁴ m²/s
+- **Steel**: α ≈ 1.2×10⁻⁵ m²/s
+- **Water**: α ≈ 1.4×10⁻⁷ m²/s
+
+**Time step guidance**:
+- CFL not required for Backward Euler, but accuracy considerations apply
+- Rule of thumb: Δt ≪ L²/α for accuracy (L = characteristic length)
+
+### Common Time-Stepping Pitfalls
+**Forgetting solution update**:
+```python
+# WRONG: Missing update
+solver.solve(b, uh.x.petsc_vec)
+# Missing: u_n.x.array[:] = uh.x.array
+
+# CORRECT: Update for next time step
+solver.solve(b, uh.x.petsc_vec)
+u_n.x.array[:] = uh.x.array
+```
+
+**Matrix assembly in loop**:
+```python
+# INEFFICIENT: Assembling matrix every step
+for t in time_steps:
+    A = fem_petsc.assemble_matrix(a, bcs=bcs)  # Wasteful!
+
+# EFFICIENT: Assemble once before loop
+A = fem_petsc.assemble_matrix(a, bcs=bcs)
+for t in time_steps:
+    # Use existing matrix A
+```
+
+### Extension to Other Time-Dependent Problems
+**Pattern applies to**:
+- **Wave equations**: Second-order in time (Newmark, etc.)
+- **Reaction-diffusion**: Multiple coupled species
+- **Fluid dynamics**: Navier-Stokes with time evolution
+- **Structural dynamics**: Vibration and impact analysis
+
+---
+
 ## Summary
 
 The key to successful FEniCSx development is:
