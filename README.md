@@ -152,6 +152,23 @@ Features:
 - **Engineering outputs**: von Mises stress, displacement fields, and strain analysis
 - **Multi-format export**: Handles complex multi-field problems
 
+### Nonlinear PDE Solving
+A comprehensive example of nonlinear partial differential equations using manufactured solutions:
+
+```bash
+cd examples/04_nonlinear_poisson/
+python3 nonlinear_poisson_p_laplacian.py
+```
+
+This advanced example demonstrates:
+- **Nonlinear PDEs**: p-Laplacian type equation with solution-dependent coefficients
+- **Manufactured solutions**: Using SymPy for symbolic computation of exact solutions
+- **Newton solver**: Iterative solution of nonlinear systems
+- **Error analysis**: L2 and pointwise error computation against analytical solutions
+- **High-order elements**: P2 finite elements with P1 export for visualization
+
+The solver achieves machine precision accuracy (errors ~10^-5) for complex nonlinear problems.
+
 ## Diagnostic and Visualization Tools
 
 ### File Health Checker

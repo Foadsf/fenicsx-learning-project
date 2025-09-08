@@ -438,6 +438,128 @@ total_heat_generated = props['q_source'] * domain_area
 
 ---
 
+## 18. Nonlinear PDE Solving in DOLFINx v0.9.0
+
+### Newton Solver Implementation
+**Challenge**: Solving nonlinear PDEs where coefficients depend on the solution
+**Example problem**: -∇·((1+u²)∇u) = f
+
+**DOLFINx v0.9.0 nonlinear solver API**:
+```python
+from dolfinx.nls.petsc import NewtonSolver
+
+# Define residual form F(u;v) = 0
+F = ufl.inner((1 + uh**2) * ufl.grad(uh), ufl.grad(v)) * ufl.dx - ufl.inner(f, v) * ufl.dx
+
+# Setup nonlinear problem
+problem = fem_petsc.NonlinearProblem(F, uh, bcs=[bc])
+solver = NewtonSolver(MPI.COMM_WORLD, problem)
+
+# Configure and solve
+solver.rtol = 1e-8
+solver.max_it = 20
+n, converged = solver.solve(uh)
+```
+
+**Key API locations discovered**:
+- Newton solver: `dolfinx.nls.petsc.NewtonSolver` (not in `fem.petsc`)
+- Nonlinear problem: `fem_petsc.NonlinearProblem`
+- No `errornorm` function available - compute manually
+
+### Manufactured Solution Workflow
+**Using SymPy for solution verification**:
+```python
+import sympy
+
+# Define analytical solution
+u_exact = 1 + x + 2*y + sympy.sin(sympy.pi*x)*sympy.cos(sympy.pi*y)
+
+# Compute source term by substitution
+k_expr = 1 + u_exact**2
+f_expr = sympy.diff(-k_expr * sympy.diff(u_exact, x), x) + \
+         sympy.diff(-k_expr * sympy.diff(u_exact, y), y)
+
+# Convert to C code for DOLFINx
+u_code = sympy.printing.ccode(u_exact_expr)
+f_code = sympy.printing.ccode(f_expr)
+```
+
+**Benefits of manufactured solutions**:
+- Exact error quantification
+- Verification of nonlinear solver implementation
+- Code validation independent of physical interpretation
+
+### High-Order Elements and Export Issues
+**Challenge**: P2 elements incompatible with XDMF mesh degree
+**Error**: "Degree of output Function must be same as mesh degree"
+
+**Solution**: Interpolate to P1 for export
+```python
+# Solve on P2 space
+V_solve = fem.functionspace(domain, ("Lagrange", 2))
+uh = fem.Function(V_solve)  # P2 solution
+
+# Export on P1 space
+V_export = fem.functionspace(domain, ("Lagrange", 1))
+uh_export = fem.Function(V_export)
+uh_export.interpolate(uh)
+```
+
+**Alternative approaches**:
+- Use VTK format which handles higher-order elements better
+- Export raw data for custom visualization
+- Use native DOLFINx visualization functions
+
+### Error Computation Without errornorm
+**Manual L2 error calculation**:
+```python
+# L2 norm: ||u_h - u_exact||_L2 = sqrt(∫(u_h - u_exact)² dx)
+error_expr = (uh - u_exact)**2
+error_L2_squared = fem.assemble_scalar(fem.form(error_expr * ufl.dx))
+error_L2 = np.sqrt(error_L2_squared)
+
+# Pointwise maximum error
+error_max = np.max(np.abs(uh.x.array - u_exact.x.array))
+```
+
+### Performance Characteristics
+**Observed Newton convergence**:
+- **Typical iterations**: 5-15 for well-posed problems
+- **Convergence rate**: Quadratic near solution
+- **Tolerance achievable**: 1e-8 to 1e-12 for smooth problems
+
+**Element choice impact**:
+- **P1 elements**: Fast assembly, lower accuracy
+- **P2 elements**: Better accuracy for smooth solutions, moderate cost
+- **P3+ elements**: Diminishing returns unless solution is very smooth
+
+### Mesh Topology Requirements
+**Critical setup step**:
+```python
+# Required before boundary condition setup
+domain.topology.create_connectivity(domain.topology.dim - 1, domain.topology.dim)
+```
+
+**Common error without connectivity**:
+"Facet to cell connectivity has not been computed"
+
+**Best practice**: Always compute required connectivity immediately after mesh creation
+
+### Nonlinear Problem Robustness
+**Convergence factors**:
+- **Initial guess quality**: Good initial approximation crucial
+- **Mesh resolution**: Sufficient resolution for capturing nonlinearity
+- **Boundary conditions**: Well-posed problem formulation
+- **Solver tolerances**: Balance accuracy vs. computational cost
+
+**Debugging nonlinear convergence**:
+- Check residual norm progression
+- Verify manufactured solution setup
+- Test with simpler linear problem first
+- Use continuation methods for difficult problems
+
+---
+
 ## Summary
 
 The key to successful FEniCSx development is:
