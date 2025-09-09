@@ -13,13 +13,22 @@ The goal is to provide a reliable path from a fresh Windows installation to solv
 ├── docs/
 │   └── lessons_learned.md  # Detailed technical notes and discoveries
 ├── examples/
-│   ├── 01_poisson_basic/   # Basic Poisson equation solver
-│   └── 02_heat_conduction_steady/ # Steady-state heat transfer example
+│   ├── 01_poisson_basic/   # Solves a simple linear elliptic PDE (Poisson equation).
+│   ├── 02_heat_conduction_steady/ # Solves steady-state heat transfer with mixed BCs.
+│   ├── 03_thermal_stress_analysis/ # Coupled thermo-mechanical simulation.
+│   ├── 04_nonlinear_poisson/ # Solves a nonlinear elliptic PDE with a Newton solver.
+│   ├── 05_transient_heat_equation/ # Solves the time-dependent heat (diffusion) equation.
+│   └── 06_navier_stokes_laminar_flow/ # Solves the incompressible Navier-Stokes equations for CFD.
 ├── helpers/                # Reusable utility and diagnostic scripts
+│   ├── check_file_health.py # Comprehensive diagnostic tool for output files.
+│   ├── open_xdmf.py        # Helper for opening files in VisIt CLI.
+│   └── pv_quicklook_gui.py # Lightweight ParaView GUI for quick visualization.
 └── output/                 # For all generated files (.vtk, .xdmf, .png, etc.)
+    └── .gitkeep            # Ensures the directory is tracked by Git.
 ```
 
 ---
+
 
 ## Installation and Setup on Windows (Step-by-Step)
 
@@ -36,34 +45,63 @@ First, enable WSL2 on your Windows machine and install a Linux distribution.
 3.  **Restart your computer** when prompted. After restarting, Ubuntu will complete its installation. You will be asked to create a username and password for your new Linux environment.
 
 ### Step 2: Set Up the FEniCSx Environment inside WSL2
-Now, open your new Ubuntu terminal (you can find it in the Start Menu). All the following commands are run inside this terminal.
+Now, open your new Ubuntu terminal (you can find it in the Start Menu). All the following commands are run inside this terminal. You will need a package manager to create a dedicated Python environment; we recommend `mamba` for its speed, but standard `conda` also works perfectly.
 
-1.  **Install Mamba:** Mamba is a much faster alternative to `conda` for managing packages.
+**Option A: Install Miniconda (to use `conda`)**
+This is the standard approach if you prefer to use `conda` directly.
+
+1.  **Download the Miniconda Installer:**
     ```bash
-    # Download the Mambaforge installer
+    wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+    ```
+2.  **Run the Installer Script:**
+    ```bash
+    bash Miniconda3-latest-Linux-x86_64.sh
+    ```
+    Follow the on-screen prompts. It is recommended to accept the default location and agree to run `conda init` when asked. This will set up your shell to use `conda`.
+3.  **Restart your Terminal:** Close and reopen your Ubuntu terminal for the changes to take effect. Your command prompt should now start with `(base)`.
+
+**Option B: Install Mambaforge (to use `mamba`, recommended for speed)**
+Mamba is a parallel, drop-in replacement for `conda` that significantly speeds up package installation.
+
+1.  **Download the Mambaforge Installer:**
+    ```bash
     wget "https://github.com/conda-forge/miniforge/releases/latest/download/Mambaforge-$(uname)-$(uname -m).sh"
-
-    # Run the installer script
+    ```
+2.  **Run the Installer Script (non-interactive):**
+    ```bash
     bash Mambaforge-*.sh -b -p "${HOME}/mambaforge"
-
-    # Activate mamba and initialize your shell
+    ```
+3.  **Activate and Initialize Mamba:**
+    ```bash
     source "${HOME}/mambaforge/bin/activate"
     mamba init
-
-    # Close and reopen your Ubuntu terminal for changes to take effect
     ```
+4.  **Restart your Terminal:** Close and reopen your Ubuntu terminal. Your command prompt should now start with `(base)`.
 
-2.  **Create and Activate the FEniCSx Environment:**
+### Step 3: Create and Activate the FEniCSx Environment
+This step is the same whether you installed Miniconda or Mambaforge.
+
+1.  **Create the environment with all necessary packages.** Use the command corresponding to your installer:
+
+    *   **If you chose Mamba:**
+        ```bash
+        mamba create -n fenicsx-env -c conda-forge fenics-dolfinx mpich pyvista h5py matplotlib sympy tqdm gmsh
+        ```
+    *   **If you chose Conda:** (This will be slower)
+        ```bash
+        conda create -n fenicsx-env
+        conda activate fenicsx-env
+        conda install -c conda-forge fenics-dolfinx mpich pyvista h5py matplotlib sympy tqdm gmsh
+        ```
+
+2.  **Activate the new environment:**
     ```bash
-    # Create the environment with all necessary packages
-    mamba create -n fenicsx-env -c conda-forge fenics-dolfinx mpich pyvista h5py matplotlib
-
-    # Activate the new environment
     conda activate fenicsx-env
     ```
-    Your terminal prompt should now start with `(fenicsx-env)`.
+    Your terminal prompt should now change to `(fenicsx-env)`.
 
-### Step 3: Clone this Repository
+### Step 4: Clone this Repository
 Clone this project to get all the examples and helper scripts.
 
 ```bash
@@ -73,7 +111,7 @@ git clone https://Foadsf/FEniCSx-Learning-Project.git
 cd FEniCSx-Learning-Project
 ```
 
-### Step 4: Install ParaView on Windows
+### Step 5: Install ParaView on Windows
 For high-quality 3D visualization, we will use ParaView on the Windows host.
 
 1.  Download and install ParaView from the [official website](https://www.paraview.org/download/).
